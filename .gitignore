@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.log
+
+data/
+app_config.json
+credential.json
+video_manager_error.log
+
+.venv/
+venv/
+env/
+
+.idea/
+.vscode/
