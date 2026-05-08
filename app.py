@@ -128,6 +128,26 @@ def ensure_unique_path(output_dir: Path, base_name: str, suffix: str) -> Path:
     return candidate
 
 
+def find_existing_download_by_default_name(output_dir: Path, task_name: str) -> Path | None:
+    safe_name = sanitize_filename(task_name)
+    expected_stem = safe_name.casefold()
+    if not output_dir.exists():
+        return None
+
+    try:
+        candidates = output_dir.rglob("*")
+    except OSError:
+        return None
+
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and candidate.stem.casefold() == expected_stem:
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def load_json_file(path: Path, default: dict) -> dict:
     if not path.exists():
         return default
@@ -391,16 +411,20 @@ class DownloadManager:
         safe_name = sanitize_filename(resolved_name)
         output_dir = Path(task.output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        preferred_path = output_dir / f"{safe_name}.mp4"
-        if task.skip_existing and preferred_path.exists():
+        existing_path = (
+            find_existing_download_by_default_name(output_dir, resolved_name)
+            if task.skip_existing
+            else None
+        )
+        if existing_path is not None:
             self._emit(
                 task.task_id,
                 title=resolved_name,
                 status="已跳过",
                 progress_text="100%",
                 speed_text="-",
-                output_file=str(preferred_path),
-                message=f"检测到同名文件，已跳过：{preferred_path.name}",
+                output_file=str(existing_path),
+                message=f"检测到同名文件，已跳过：{existing_path.name}",
             )
             return
         final_path = ensure_unique_path(output_dir, safe_name, ".mp4")
@@ -708,7 +732,6 @@ class VideoManagerApp:
         self.root.minsize(1120, 620)
 
         config = load_config()
-        self.name_var = tk.StringVar()
         self.output_dir_var = tk.StringVar(value=config["output_dir"])
         self.expand_collection_var = tk.BooleanVar(
             value=config["expand_single_video_to_all_pages"]
@@ -719,11 +742,11 @@ class VideoManagerApp:
         self.status_var = tk.StringVar(value="等待任务")
         self.progress_text_var = tk.StringVar(value="")
         self.message_var = tk.StringVar(
-            value="支持一次粘贴多行文本，程序会自动提取其中的 B 站链接并排队下载。"
+            value="支持一次粘贴多行文本，程序会自动提取其中的B站链接并排队下载。"
         )
         self.output_path_var = tk.StringVar(value="")
         self.progress_value_var = tk.DoubleVar(value=0.0)
-        self.queue_summary_var = tk.StringVar(value="总任务 0 | 下载中 0 | 排队 0 | 已完成 0")
+        self.queue_summary_var = tk.StringVar(value="总任务 0 | 排队 0 | 已完成 0")
 
         self.event_queue: queue.Queue[TaskEvent] = queue.Queue()
         self.collection_queue: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -759,7 +782,6 @@ class VideoManagerApp:
         left_panel = tb.Frame(main)
         left_panel.grid(row=0, column=0, sticky="nsew")
         left_panel.columnconfigure(0, weight=1)
-        left_panel.rowconfigure(2, weight=1)
 
         form = tb.Frame(left_panel, padding=(0, 0))
         form.grid(row=0, column=0, sticky="ew")
@@ -796,17 +818,11 @@ class VideoManagerApp:
         )
         self.skip_existing_check.grid(row=1, column=2, sticky="w", padx=(18, 0), pady=(0, 16))
 
-        tb.Label(form, text="视频命名", font=label_font).grid(
-            row=2, column=0, sticky="w", padx=(0, 16), pady=(0, 16)
-        )
-        self.name_entry = tb.Entry(form, textvariable=self.name_var)
-        self.name_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=(0, 16))
-
         tb.Label(form, text="保存目录", font=label_font).grid(
-            row=3, column=0, sticky="w", padx=(0, 16)
+            row=2, column=0, sticky="w", padx=(0, 16)
         )
         self.dir_entry = tb.Entry(form, textvariable=self.output_dir_var)
-        self.dir_entry.grid(row=3, column=1, columnspan=2, sticky="ew")
+        self.dir_entry.grid(row=2, column=1, columnspan=2, sticky="ew")
 
         action_bar = tb.Frame(left_panel)
         action_bar.grid(row=1, column=0, sticky="w", pady=(22, 0))
@@ -829,7 +845,7 @@ class VideoManagerApp:
         self.start_button.grid(row=0, column=1, sticky="w", padx=(14, 0))
 
         details = tb.Labelframe(left_panel, text="任务详情", padding=(20, 18))
-        details.grid(row=2, column=0, sticky="nsew", pady=(24, 0))
+        details.grid(row=2, column=0, sticky="ew", pady=(24, 0))
         details.columnconfigure(0, weight=1)
         details.columnconfigure(1, weight=1)
 
@@ -867,18 +883,18 @@ class VideoManagerApp:
             details,
             textvariable=self.message_var,
             font=("Microsoft YaHei UI", 10),
-            wraplength=620,
+            wraplength=680,
             justify="left",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
         tb.Label(
             details,
             textvariable=self.output_path_var,
             font=("Consolas", 9),
-            wraplength=620,
+            wraplength=680,
             justify="left",
             bootstyle="secondary",
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
         queue_frame = tb.Labelframe(main, text="任务队列", padding=(20, 18))
         queue_frame.grid(row=0, column=1, sticky="nsew", padx=(24, 0))
@@ -971,8 +987,14 @@ class VideoManagerApp:
                 return existing_task
         return None
 
-    def _add_skipped_task(self, title: str, output_path: Path, reason: str) -> str:
-        expected_path = self._build_expected_output_path(output_path, title)
+    def _add_skipped_task(
+        self,
+        title: str,
+        output_path: Path,
+        reason: str,
+        existing_path: Path | None = None,
+    ) -> str:
+        expected_path = existing_path or self._build_expected_output_path(output_path, title)
         task = DownloadTask(
             task_id=uuid.uuid4().hex[:10],
             url="",
@@ -990,7 +1012,7 @@ class VideoManagerApp:
         self.task_tree.insert("", "end", iid=task.task_id, text=self._format_task_list_text(task))
         return task.task_id
 
-    def _submit_collection_resolution(self, url: str, output_path: Path, custom_name: str) -> None:
+    def _submit_collection_resolution(self, url: str, output_path: Path) -> None:
         try:
             resolved_entries = asyncio.run(resolve_single_video_entries(url))
         except Exception as exc:
@@ -1003,7 +1025,6 @@ class VideoManagerApp:
                 {
                     "resolved_entries": resolved_entries,
                     "output_path": output_path,
-                    "custom_name": custom_name,
                 },
             )
         )
@@ -1022,13 +1043,11 @@ class VideoManagerApp:
         self,
         resolved_entries: list[tuple[str, str]],
         output_path: Path,
-        custom_name: str,
         from_collection_expansion: bool,
     ) -> None:
         context = {
             "entries": resolved_entries,
             "output_path": output_path,
-            "custom_name": custom_name,
             "from_collection_expansion": from_collection_expansion,
             "first_new_task_id": None,
             "index": 0,
@@ -1038,8 +1057,6 @@ class VideoManagerApp:
             ),
         }
         self._set_url_text("")
-        if len(resolved_entries) > 1:
-            self.name_var.set("")
         self._enqueue_entries_batch(context)
 
     def _enqueue_entries_batch(self, context: dict) -> None:
@@ -1048,23 +1065,23 @@ class VideoManagerApp:
         start_index = context["index"]
         end_index = min(start_index + batch_size, len(entries))
         output_path: Path = context["output_path"]
-        custom_name: str = context["custom_name"]
         skip_existing = self.skip_existing_var.get()
 
         for index in range(start_index, end_index):
             url, title_hint = entries[index]
-            use_custom_name = len(entries) == 1
-            placeholder_title = (
-                custom_name if use_custom_name else title_hint or f"队列任务 {len(self.tasks) + 1}"
-            )
+            placeholder_title = title_hint or f"队列任务 {len(self.tasks) + 1}"
             if skip_existing and placeholder_title:
-                expected_path = self._build_expected_output_path(output_path, placeholder_title)
+                existing_path = find_existing_download_by_default_name(
+                    output_path,
+                    placeholder_title,
+                )
                 duplicate_task = self._find_duplicate_task(output_path, placeholder_title)
-                if expected_path.exists():
+                if existing_path is not None:
                     skipped_task_id = self._add_skipped_task(
                         title=placeholder_title,
                         output_path=output_path,
-                        reason=f"检测到同名文件，已跳过：{expected_path.name}",
+                        reason=f"检测到同名文件，已跳过：{existing_path.name}",
+                        existing_path=existing_path,
                     )
                     if context["first_new_task_id"] is None:
                         context["first_new_task_id"] = skipped_task_id
@@ -1081,7 +1098,7 @@ class VideoManagerApp:
             task = DownloadTask(
                 task_id=uuid.uuid4().hex[:10],
                 url=url,
-                custom_name=custom_name if use_custom_name else "",
+                custom_name="",
                 output_dir=str(output_path),
                 skip_existing=skip_existing,
                 title=placeholder_title or f"待解析视频 {index + 1}",
@@ -1117,7 +1134,6 @@ class VideoManagerApp:
     def _start_download(self) -> None:
         urls = extract_supported_urls(self._get_url_text())
         output_dir = self.output_dir_var.get().strip().strip('"')
-        custom_name = normalize_custom_name(self.name_var.get().strip())
         self.follow_active_task = True
 
         if not urls:
@@ -1135,7 +1151,7 @@ class VideoManagerApp:
             self._set_collection_resolving(True)
             threading.Thread(
                 target=self._submit_collection_resolution,
-                args=(urls[0], output_path, custom_name),
+                args=(urls[0], output_path),
                 daemon=True,
                 name="resolve-collection",
             ).start()
@@ -1144,7 +1160,6 @@ class VideoManagerApp:
         self._enqueue_resolved_entries(
             resolved_entries=[(url, "") for url in urls],
             output_path=output_path,
-            custom_name=custom_name,
             from_collection_expansion=False,
         )
 
@@ -1172,7 +1187,6 @@ class VideoManagerApp:
                 self._enqueue_resolved_entries(
                     resolved_entries=payload["resolved_entries"],
                     output_path=payload["output_path"],
-                    custom_name=payload["custom_name"],
                     from_collection_expansion=True,
                 )
         return processed
@@ -1268,13 +1282,11 @@ class VideoManagerApp:
         self._show_task(selection[0])
 
     def _refresh_queue_summary(self) -> None:
-        active_count, pending_count = self.manager.get_counts()
+        _active_count, pending_count = self.manager.get_counts()
         completed_count = sum(task.status == "完成" for task in self.tasks.values())
         skipped_count = sum(task.status == "已跳过" for task in self.tasks.values())
         failed_count = sum(task.status == "失败" for task in self.tasks.values())
-        summary = (
-            f"总任务 {len(self.tasks)} | 下载中 {active_count} | 排队 {pending_count} | 已完成 {completed_count}"
-        )
+        summary = f"总任务 {len(self.tasks)} | 排队 {pending_count} | 已完成 {completed_count}"
         if skipped_count:
             summary += f" | 已跳过 {skipped_count}"
         if failed_count:
