@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 import uuid
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,7 +32,13 @@ from bilibili_api.video import (
 )
 from tkinter import filedialog, messagebox, ttk
 
-APP_DIR = Path(__file__).resolve().parent
+def resolve_app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+APP_DIR = resolve_app_dir()
 DATA_DIR = APP_DIR / "data"
 CONFIG_PATH = APP_DIR / "app_config.json"
 CREDENTIAL_PATH = APP_DIR / "credential.json"

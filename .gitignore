@@ -6,6 +6,9 @@ data/
 app_config.json
 credential.json
 video_manager_error.log
+build/
+dist/
+*.spec
 
 .venv/
 venv/
